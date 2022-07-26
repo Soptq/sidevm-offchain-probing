@@ -74,7 +74,7 @@ impl Peer {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Probe {
     // identity
     pub encoded_public_key: String,

@@ -1,3 +1,5 @@
+use serde::{Serialize, Deserialize};
+
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct ProbeParameters {
     pub dim_size: u64,
