@@ -4,10 +4,10 @@ use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use scale::Encode;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
-use crate::utils::{cache_get, http_get, euclidean_distance, gen_random_vec};
 use crate::types::{ProbeParameters, ProbeStatus};
+use crate::utils::{cache_get, euclidean_distance, gen_random_vec, http_get};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Peer {
@@ -36,9 +36,7 @@ impl Peer {
         http_get(&url).await?;
 
         let end = SystemTime::now();
-        let end_since_the_epoch = end
-            .duration_since(UNIX_EPOCH)
-            .expect("Time went backwards");
+        let end_since_the_epoch = end.duration_since(UNIX_EPOCH).expect("Time went backwards");
         let end_ms = end_since_the_epoch.as_millis();
 
         // TODO: remove delay
@@ -66,8 +64,14 @@ impl Peer {
     }
 
     pub async fn add_peer(&self, encoded_public_key: &str, host: &str, port: u16) -> Result<()> {
-        info!("Add peer {}:{}[{}] to peer {}", &host, &port, &encoded_public_key, &self.encoded_public_key);
-        let url = format!("http://{}:{}/add_peer/{}/{}/{}", &self.host, &self.port, &encoded_public_key, &host, &port);
+        info!(
+            "Add peer {}:{}[{}] to peer {}",
+            &host, &port, &encoded_public_key, &self.encoded_public_key
+        );
+        let url = format!(
+            "http://{}:{}/add_peer/{}/{}/{}",
+            &self.host, &self.port, &encoded_public_key, &host, &port
+        );
         let response = http_get(&url).await?;
 
         Ok(())
@@ -93,28 +97,29 @@ impl Probe {
         let encoded_public_key = hex::encode(public_key);
 
         // get parameters from cache
-        let dim_size = cache_get::<u64>(b"sidevm_probing::param::dim_size")
-            .unwrap_or(3 as u64);
-        let sample_size = cache_get::<u64>(b"sidevm_probing::param::sample_size")
-            .unwrap_or(10 as u64);
-        let detection_size = cache_get::<u64>(b"sidevm_probing::param::detection_size")
-            .unwrap_or(5 as u64);
-        let batch_size = cache_get::<u64>(b"sidevm_probing::param::batch_size")
-            .unwrap_or(64 as u64);
+        let dim_size = cache_get::<u64>(b"sidevm_probing::param::dim_size").unwrap_or(3 as u64);
+        let sample_size =
+            cache_get::<u64>(b"sidevm_probing::param::sample_size").unwrap_or(10 as u64);
+        let detection_size =
+            cache_get::<u64>(b"sidevm_probing::param::detection_size").unwrap_or(5 as u64);
+        let batch_size =
+            cache_get::<u64>(b"sidevm_probing::param::batch_size").unwrap_or(64 as u64);
 
-        let beta = cache_get::<u64>(b"sidevm_probing::param::beta")
-            .unwrap_or(9 * 1e5 as u64) as f64 / 1e6 as f64;
+        let beta = cache_get::<u64>(b"sidevm_probing::param::beta").unwrap_or(9 * 1e5 as u64)
+            as f64
+            / 1e6 as f64;
 
-        let lr = cache_get::<u64>(b"sidevm_probing::param::lr")
-            .unwrap_or(1 * 1e6 as u64) as f64 / 1e6 as f64;
-        let patience = cache_get::<u64>(b"sidevm_probing::param::patience")
-            .unwrap_or(1000 as u64);
-        let factor = cache_get::<u64>(b"sidevm_probing::param::factor")
-            .unwrap_or(1 * 1e5 as u64) as f64 / 1e6 as f64;
-        let min_lr = cache_get::<u64>(b"sidevm_probing::param::min_lr")
-            .unwrap_or(1 * 1e3 as u64) as f64 / 1e6 as f64;
-        let max_iters = cache_get::<u64>(b"sidevm_probing::param::max_iters")
-            .unwrap_or(10000 as u64);
+        let lr = cache_get::<u64>(b"sidevm_probing::param::lr").unwrap_or(1 * 1e6 as u64) as f64
+            / 1e6 as f64;
+        let patience = cache_get::<u64>(b"sidevm_probing::param::patience").unwrap_or(1000 as u64);
+        let factor = cache_get::<u64>(b"sidevm_probing::param::factor").unwrap_or(1 * 1e5 as u64)
+            as f64
+            / 1e6 as f64;
+        let min_lr = cache_get::<u64>(b"sidevm_probing::param::min_lr").unwrap_or(1 * 1e3 as u64)
+            as f64
+            / 1e6 as f64;
+        let max_iters =
+            cache_get::<u64>(b"sidevm_probing::param::max_iters").unwrap_or(10000 as u64);
 
         // initialize local database
         let mut telemetry = HashMap::new();
@@ -122,7 +127,10 @@ impl Probe {
         let mut peers = HashMap::new();
 
         telemetry.insert(encoded_public_key.clone(), 0 as f64);
-        resolved.insert(encoded_public_key.clone(), gen_random_vec::<f64>(dim_size as usize));
+        resolved.insert(
+            encoded_public_key.clone(),
+            gen_random_vec::<f64>(dim_size as usize),
+        );
 
         // sidevm::ocall::local_cache_set(b"sidevm_probing::telemetry", &serde_json::to_string(&telemetry).unwrap().as_bytes()).unwrap();
         // sidevm::ocall::local_cache_set(b"sidevm_probing::resolve", &resolved.encode()).unwrap();
@@ -159,9 +167,7 @@ impl Probe {
             telemetry,
             resolved,
             peers,
-            status: ProbeStatus {
-                precision_ms: 0.0,
-            }
+            status: ProbeStatus { precision_ms: 0.0 },
         }
     }
 
@@ -181,10 +187,13 @@ impl Probe {
             None => {
                 info!("Peer {} is not in the resolved list", encoded_public_key);
                 return Ok(0.0 as f64);
-            },
+            }
         };
 
-        let my_position = self.resolved.get(&self.encoded_public_key).expect("My position should be found");
+        let my_position = self
+            .resolved
+            .get(&self.encoded_public_key)
+            .expect("My position should be found");
 
         Ok(euclidean_distance(&my_position, &peer_position))
     }

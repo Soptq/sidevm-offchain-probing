@@ -1,25 +1,25 @@
 use anyhow::Result;
-use std::convert::Infallible;
-use std::collections::HashMap;
-use std::time::Duration;
 use log::{error, info};
+use std::collections::HashMap;
+use std::convert::Infallible;
+use std::time::Duration;
 
 use rand::{seq::IteratorRandom, thread_rng};
 
-use service::RouterService;
+use probe::{Peer, Probe};
 use router::router;
-use probe::{Probe, Peer};
-use utils::{euclidean_distance, gen_random_vec};
+use service::RouterService;
 use types::{ProbeParameters, ProbeStatus};
+use utils::{euclidean_distance, gen_random_vec};
 
-use tokio::sync::Mutex;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
-mod service;
-mod router;
 mod probe;
-mod utils;
+mod router;
+mod service;
 mod types;
+mod utils;
 
 pub type AppState = Arc<Mutex<Option<Probe>>>;
 
@@ -42,16 +42,16 @@ async fn init_pink_input() -> Result<(), Infallible> {
                     // } else {
                     //     error!("Probe already initialized");
                     // }
-                },
+                }
                 "start_probing" => {
                     info!("Starting probing...");
-                },
+                }
                 "stop_probing" => {
                     info!("Stop probing...");
-                },
+                }
                 "purge_cache" => {
                     info!("Purge Cache...");
-                },
+                }
                 _ => {
                     info!("Unknown message: {}", msg);
                 }
@@ -109,7 +109,10 @@ async fn optimize(app_state: AppState, host: &str, port: u16) -> Result<()> {
         // collect telemetry
         {
             let mut rng = thread_rng();
-            let batch_peers_id = peers.keys().cloned().choose_multiple(&mut rng, parameters.detection_size as usize);
+            let batch_peers_id = peers
+                .keys()
+                .cloned()
+                .choose_multiple(&mut rng, parameters.detection_size as usize);
             for peer_id in &batch_peers_id {
                 sidevm::time::sleep(PHANTOM_BREAK).await;
                 let peer = peers.get(peer_id).expect("peer should be in the peers");
@@ -145,7 +148,8 @@ async fn optimize(app_state: AppState, host: &str, port: u16) -> Result<()> {
 
         // start optimizing
         {
-            let mut my_position: Vec<f64> = resolved.get(&encoded_public_key)
+            let mut my_position: Vec<f64> = resolved
+                .get(&encoded_public_key)
                 .expect(format!("{} should be in the resolved data", &encoded_public_key).as_str())
                 .to_vec();
             let mut momentum: Vec<f64> = vec![0.0 as f64; parameters.dim_size as usize];
@@ -167,7 +171,10 @@ async fn optimize(app_state: AppState, host: &str, port: u16) -> Result<()> {
                 iteration += 1;
                 // step 1: random sample a batch of telemetry data to process
                 let mut rng = thread_rng();
-                let batch_peers_id = peers.keys().cloned().choose_multiple(&mut rng, parameters.batch_size as usize);
+                let batch_peers_id = peers
+                    .keys()
+                    .cloned()
+                    .choose_multiple(&mut rng, parameters.batch_size as usize);
                 // step 2: local optimize
                 let mut force: Vec<f64> = vec![0.0 as f64; parameters.dim_size as usize];
                 let mut peers_len: usize = 0;
@@ -179,14 +186,27 @@ async fn optimize(app_state: AppState, host: &str, port: u16) -> Result<()> {
                     }
                     peers_len += 1;
 
-                    let ground_truth = telemetry.get(&peer.encoded_public_key)
-                        .expect(format!("{} should be in the telemetry data", &peer.encoded_public_key).as_str());
+                    let ground_truth = telemetry.get(&peer.encoded_public_key).expect(
+                        format!(
+                            "{} should be in the telemetry data",
+                            &peer.encoded_public_key
+                        )
+                        .as_str(),
+                    );
 
                     if !resolved.contains_key(&peer.encoded_public_key) {
-                        resolved.insert(peer.encoded_public_key.clone(), gen_random_vec::<f64>(parameters.dim_size as usize));
+                        resolved.insert(
+                            peer.encoded_public_key.clone(),
+                            gen_random_vec::<f64>(parameters.dim_size as usize),
+                        );
                     }
-                    let peer_position = resolved.get(&peer.encoded_public_key)
-                        .expect(format!("{} should be in the resolved data", &peer.encoded_public_key).as_str());
+                    let peer_position = resolved.get(&peer.encoded_public_key).expect(
+                        format!(
+                            "{} should be in the resolved data",
+                            &peer.encoded_public_key
+                        )
+                        .as_str(),
+                    );
 
                     let prediction = euclidean_distance(&my_position, &peer_position);
                     let error = ground_truth - prediction;
@@ -211,7 +231,9 @@ async fn optimize(app_state: AppState, host: &str, port: u16) -> Result<()> {
                 momentum = momentum
                     .iter()
                     .zip(force.iter())
-                    .map(|(i, j)| i * parameters.beta + j * (1.0 - parameters.beta) / peers_len as f64)
+                    .map(|(i, j)| {
+                        i * parameters.beta + j * (1.0 - parameters.beta) / peers_len as f64
+                    })
                     .collect::<Vec<f64>>();
                 // update my position
                 my_position = my_position
@@ -227,7 +249,8 @@ async fn optimize(app_state: AppState, host: &str, port: u16) -> Result<()> {
                         // skip my own data
                         continue;
                     }
-                    let test_peer_position = resolved.get(test_entry)
+                    let test_peer_position = resolved
+                        .get(test_entry)
                         .expect(format!("{} should be in the resolved data", test_entry).as_str());
                     let test_prediction = euclidean_distance(&my_position, &test_peer_position);
                     let test_error = (test_label - test_prediction).abs();
@@ -244,7 +267,10 @@ async fn optimize(app_state: AppState, host: &str, port: u16) -> Result<()> {
                     patience = 0;
                 }
                 if iteration % 1000 == 0 {
-                    info!("Iteration: {}, Loss: {}, Min Loss {}, Learning Rate: {}", iteration, test_total_loss, min_loss, current_lr);
+                    info!(
+                        "Iteration: {}, Loss: {}, Min Loss {}, Learning Rate: {}",
+                        iteration, test_total_loss, min_loss, current_lr
+                    );
                 }
             }
 
@@ -258,7 +284,10 @@ async fn optimize(app_state: AppState, host: &str, port: u16) -> Result<()> {
         // TODO: Momentum accelerated aggregation
         {
             let mut rng = thread_rng();
-            let batch_peers_id = peers.keys().cloned().choose_multiple(&mut rng, parameters.sample_size as usize);
+            let batch_peers_id = peers
+                .keys()
+                .cloned()
+                .choose_multiple(&mut rng, parameters.sample_size as usize);
             let mut aggregation_counter = HashMap::<String, u64>::new();
             for peer_id in &batch_peers_id {
                 let peer = peers.get(peer_id).expect("peer should be in the peers");
@@ -269,7 +298,12 @@ async fn optimize(app_state: AppState, host: &str, port: u16) -> Result<()> {
                 for (k, v) in peer_resolved {
                     sidevm::time::sleep(PHANTOM_BREAK).await;
                     if let Some(value) = resolved.get_mut(&k) {
-                        *value = (*value.iter().zip(v.iter()).map(|(i, j)| i + j).collect::<Vec<f64>>()).to_vec();
+                        *value = (*value
+                            .iter()
+                            .zip(v.iter())
+                            .map(|(i, j)| i + j)
+                            .collect::<Vec<f64>>())
+                        .to_vec();
                         if let Some(value) = aggregation_counter.get_mut(&k) {
                             *value += 1;
                         } else {
@@ -283,22 +317,33 @@ async fn optimize(app_state: AppState, host: &str, port: u16) -> Result<()> {
             }
             for (k, v) in &aggregation_counter {
                 let value = resolved.get_mut(k).expect("should be in the resolved data");
-                *value = (value.iter().map(|i| i / v.clone() as f64).collect::<Vec<f64>>()).to_vec();
+                *value = (value
+                    .iter()
+                    .map(|i| i / v.clone() as f64)
+                    .collect::<Vec<f64>>())
+                .to_vec();
             }
             // rebase resolved data so that the center of all positions is at the origin
             if aggregation_counter.len() > 0 {
-                let center = resolved
-                    .values()
-                    .fold(vec![0.0 as f64; parameters.dim_size as usize], |acc, x| {
-                        acc
-                            .iter()
+                let center = resolved.values().fold(
+                    vec![0.0 as f64; parameters.dim_size as usize],
+                    |acc, x| {
+                        acc.iter()
                             .zip(x.iter())
-                            .map(|(i, j)| i + j / resolved.len() as f64).collect::<Vec<f64>>()
-                    });
+                            .map(|(i, j)| i + j / resolved.len() as f64)
+                            .collect::<Vec<f64>>()
+                    },
+                );
                 resolved = resolved
                     .iter()
                     .map(|(k, v)| {
-                        (k.clone(), v.iter().zip(center.iter()).map(|(i, j)| i - j).collect::<Vec<f64>>())
+                        (
+                            k.clone(),
+                            v.iter()
+                                .zip(center.iter())
+                                .map(|(i, j)| i - j)
+                                .collect::<Vec<f64>>(),
+                        )
                     })
                     .collect::<HashMap<String, Vec<f64>>>();
             }
@@ -318,7 +363,7 @@ async fn optimize(app_state: AppState, host: &str, port: u16) -> Result<()> {
                 probe.add_peer(
                     possible_peer.encoded_public_key.clone(),
                     possible_peer.host.clone(),
-                    possible_peer.port
+                    possible_peer.port,
                 );
             }
             possible_peers.clear();

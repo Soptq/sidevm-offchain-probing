@@ -1,19 +1,21 @@
-use std::convert::Infallible;
 use log::{error, info};
+use std::convert::Infallible;
 
-use hyper::{Request, Response, Body};
+use hyper::{Body, Request, Response};
 
 use routerify::prelude::*;
 use routerify::Router;
 
-use tokio::sync::Mutex;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
-use crate::{Probe, AppState};
+use crate::{AppState, Probe};
 
 async fn root_handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
     log::info!("accessing root handler");
-    Ok(Response::new(Body::from("Welcome to the Phala's off-chain probing service\n")))
+    Ok(Response::new(Body::from(
+        "Welcome to the Phala's off-chain probing service\n",
+    )))
 }
 
 async fn echo_handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
