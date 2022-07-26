@@ -17,6 +17,7 @@ async fn root_handler(req: Request<Body>) -> Result<Response<Body>, Infallible> 
 }
 
 async fn echo_handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+    log::info!("echo");
     let msg = req.param("msg").unwrap();
     Ok(Response::new(Body::from(msg.clone())))
 }
@@ -51,7 +52,17 @@ async fn peers_handler(req: Request<Body>) -> Result<Response<Body>, Infallible>
     Ok(Response::new(Body::from(peers)))
 }
 
+async fn status_handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+    let state = req.data::<AppState>().unwrap();
+    let lock = state.lock().await;
+    let probe = (*lock).as_ref().unwrap();
+
+    let status = serde_json::to_string(&probe.status).unwrap();
+    Ok(Response::new(Body::from(status)))
+}
+
 async fn add_peer_handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+    log::info!("add_peer");
     let peer_id = req.param("peer_id").unwrap();
     let host = req.param("host").unwrap();
     let port = req.param("port").unwrap().parse::<u16>().unwrap();
@@ -64,6 +75,7 @@ async fn add_peer_handler(req: Request<Body>) -> Result<Response<Body>, Infallib
 }
 
 async fn estimate_handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+    log::info!("estimate");
     let peer_id = req.param("peer_id").unwrap();
     let state = req.data::<AppState>().unwrap();
     let mut lock = state.lock().await;
@@ -80,9 +92,12 @@ pub fn router(app_state: AppState) -> Router<Body, Infallible> {
         .get("/echo/:msg", echo_handler)
         .get("/telemetry", telemetry_handler)
         .get("/resolved", resolved_handler)
+        // TODO: The following can be replaced by the key in the resolved data in production
         .get("/peers", peers_handler)
-        .get("/add_peer/:peer_id/:host/:port", add_peer_handler)
         .get("/estimate/:peer_id", estimate_handler)
+        .get("/status", status_handler)
+        // TODO: For testing, need to remove this entry point later
+        .get("/add_peer/:peer_id/:host/:port", add_peer_handler)
         .build()
         .unwrap()
 }

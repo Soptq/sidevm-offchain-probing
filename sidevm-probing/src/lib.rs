@@ -8,8 +8,9 @@ use rand::{seq::IteratorRandom, thread_rng};
 
 use service::RouterService;
 use router::router;
-use probe::{Probe, ProbeParameters, Peer};
-use utils::{euclidean_distance};
+use probe::{Probe, Peer};
+use utils::{euclidean_distance, gen_random_vec};
+use types::{ProbeParameters, ProbeStatus};
 
 use tokio::sync::Mutex;
 use std::sync::Arc;
@@ -18,8 +19,12 @@ mod service;
 mod router;
 mod probe;
 mod utils;
+mod types;
 
 pub type AppState = Arc<Mutex<Option<Probe>>>;
+
+const PHANTOM_BREAK: Duration = Duration::from_millis(0);
+const TIMEOUT_MAX_MILLIS: f64 = 1.0 * 60.0 * 1000.0; // 1 minute
 
 async fn init_pink_input() -> Result<(), Infallible> {
     info!("Initializing pink input...");
@@ -83,13 +88,15 @@ async fn optimize(app_state: AppState, host: &str, port: u16) -> Result<()> {
         let mut parameters: ProbeParameters = ProbeParameters::default();
         let mut telemetry: HashMap<String, f64> = HashMap::new();
         let mut resolved: HashMap<String, Vec<f64>> = HashMap::new();
+        let mut status: ProbeStatus = ProbeStatus::default();
+
         let mut peers: HashMap<String, Peer> = HashMap::new();
         let mut possible_peers: Vec<Peer> = Vec::new();
 
         // clone a copy of necessary data
         {
             let mut lock = app_state.lock().await;
-            let probe = (*lock).as_ref().unwrap();
+            let probe = (*lock).as_ref().expect("should be able to get probe ref");
             encoded_public_key = probe.encoded_public_key.clone();
             parameters = probe.parameters.clone();
             telemetry = probe.telemetry.clone();
@@ -97,19 +104,22 @@ async fn optimize(app_state: AppState, host: &str, port: u16) -> Result<()> {
             peers = probe.peers.clone();
         }
 
+        sidevm::time::sleep(PHANTOM_BREAK).await;
+
         // collect telemetry
         {
             let mut rng = thread_rng();
             let batch_peers_id = peers.keys().cloned().choose_multiple(&mut rng, parameters.detection_size as usize);
             for peer_id in &batch_peers_id {
-                let peer = peers.get(peer_id).unwrap();
+                sidevm::time::sleep(PHANTOM_BREAK).await;
+                let peer = peers.get(peer_id).expect("peer should be in the peers");
                 // send "friend" request
                 peer.add_peer(&encoded_public_key, host, port).await;
 
                 // collect ttl
                 let ttl = match peer.echo().await {
                     Ok(ttl) => ttl,
-                    Err(_) => f64::MAX,
+                    Err(_) => TIMEOUT_MAX_MILLIS,
                 };
 
                 if let Some(value) = telemetry.get_mut(&peer.encoded_public_key) {
@@ -125,14 +135,13 @@ async fn optimize(app_state: AppState, host: &str, port: u16) -> Result<()> {
                 };
 
                 for ext_peer in external_peers.values() {
-                    if peers.contains_key(&ext_peer.encoded_public_key) || ext_peer.encoded_public_key == encoded_public_key {
-                        continue;
-                    }
                     possible_peers.push(ext_peer.clone());
                 }
                 info!("Peers discovery: {:?}", &possible_peers);
             }
         }
+
+        sidevm::time::sleep(PHANTOM_BREAK).await;
 
         // start optimizing
         {
@@ -147,6 +156,10 @@ async fn optimize(app_state: AppState, host: &str, port: u16) -> Result<()> {
             let mut patience: u64 = 0;
 
             loop {
+                // if it reaches the maximum number of iterations, stop optimizing
+                if iteration >= parameters.max_iters {
+                    break;
+                }
                 // early return if learning rate reaches threshold
                 if &current_lr < &parameters.min_lr {
                     break;
@@ -157,11 +170,24 @@ async fn optimize(app_state: AppState, host: &str, port: u16) -> Result<()> {
                 let batch_peers_id = peers.keys().cloned().choose_multiple(&mut rng, parameters.batch_size as usize);
                 // step 2: local optimize
                 let mut force: Vec<f64> = vec![0.0 as f64; parameters.dim_size as usize];
+                let mut peers_len: usize = 0;
                 for peer_id in &batch_peers_id {
-                    let peer = peers.get(peer_id).unwrap();
-                    let ground_truth = telemetry.get(&peer.encoded_public_key).unwrap_or(&0.0);
+                    sidevm::time::sleep(PHANTOM_BREAK).await;
+                    let peer = peers.get(peer_id).expect("peer should be in the peers");
+                    if !telemetry.contains_key(&peer.encoded_public_key) {
+                        continue;
+                    }
+                    peers_len += 1;
+
+                    let ground_truth = telemetry.get(&peer.encoded_public_key)
+                        .expect(format!("{} should be in the telemetry data", &peer.encoded_public_key).as_str());
+
+                    if !resolved.contains_key(&peer.encoded_public_key) {
+                        resolved.insert(peer.encoded_public_key.clone(), gen_random_vec::<f64>(parameters.dim_size as usize));
+                    }
                     let peer_position = resolved.get(&peer.encoded_public_key)
                         .expect(format!("{} should be in the resolved data", &peer.encoded_public_key).as_str());
+
                     let prediction = euclidean_distance(&my_position, &peer_position);
                     let error = ground_truth - prediction;
                     let direction = my_position
@@ -174,15 +200,18 @@ async fn optimize(app_state: AppState, host: &str, port: u16) -> Result<()> {
                     force = force
                         .iter()
                         .zip(direction.iter())
-                        .map(|(f, x)| f + (x / (norm.sqrt() + parameters.eps)) * error / batch_peers_id.len() as f64)
+                        .map(|(f, x)| f + (x / (norm.sqrt() + parameters.eps)) * error)
                         .collect::<Vec<f64>>();
+                }
+                if peers_len == 0 {
+                    break;
                 }
                 // step 3: update position
                 // update momentum
                 momentum = momentum
                     .iter()
                     .zip(force.iter())
-                    .map(|(i, j)| i * parameters.beta + j * (1.0 - parameters.beta))
+                    .map(|(i, j)| i * parameters.beta + j * (1.0 - parameters.beta) / peers_len as f64)
                     .collect::<Vec<f64>>();
                 // update my position
                 my_position = my_position
@@ -193,6 +222,7 @@ async fn optimize(app_state: AppState, host: &str, port: u16) -> Result<()> {
                 // step 4: calculate loss and update parameters
                 let mut test_total_loss: f64 = 0.0;
                 for (test_entry, test_label) in telemetry.iter() {
+                    sidevm::time::sleep(PHANTOM_BREAK).await;
                     if test_entry == &encoded_public_key {
                         // skip my own data
                         continue;
@@ -219,20 +249,25 @@ async fn optimize(app_state: AppState, host: &str, port: u16) -> Result<()> {
             }
 
             resolved.insert(encoded_public_key.clone(), my_position);
+            status.precision_ms = min_loss;
         }
 
+        sidevm::time::sleep(PHANTOM_BREAK).await;
+
         // Aggregate from other peers' resolved.
+        // TODO: Momentum accelerated aggregation
         {
             let mut rng = thread_rng();
             let batch_peers_id = peers.keys().cloned().choose_multiple(&mut rng, parameters.sample_size as usize);
             let mut aggregation_counter = HashMap::<String, u64>::new();
             for peer_id in &batch_peers_id {
-                let peer = peers.get(peer_id).unwrap();
+                let peer = peers.get(peer_id).expect("peer should be in the peers");
                 let peer_resolved = match peer.resolved().await {
                     Ok(resolved) => resolved,
                     Err(_) => continue,
                 };
                 for (k, v) in peer_resolved {
+                    sidevm::time::sleep(PHANTOM_BREAK).await;
                     if let Some(value) = resolved.get_mut(&k) {
                         *value = (*value.iter().zip(v.iter()).map(|(i, j)| i + j).collect::<Vec<f64>>()).to_vec();
                         if let Some(value) = aggregation_counter.get_mut(&k) {
@@ -269,15 +304,17 @@ async fn optimize(app_state: AppState, host: &str, port: u16) -> Result<()> {
             }
         }
 
-        info!("resolved data: {:?}", resolved);
+        sidevm::time::sleep(PHANTOM_BREAK).await;
+
         // update the app_state
         {
             let mut lock = app_state.lock().await;
-            let mut probe = (*lock).as_mut().unwrap();
+            let mut probe = (*lock).as_mut().expect("should be able to get mut ref");
             probe.telemetry = telemetry;
             probe.resolved = resolved;
-            probe.peers = peers;
+            probe.status = status;
             for possible_peer in &possible_peers {
+                sidevm::time::sleep(PHANTOM_BREAK).await;
                 probe.add_peer(
                     possible_peer.encoded_public_key.clone(),
                     possible_peer.host.clone(),
@@ -287,8 +324,7 @@ async fn optimize(app_state: AppState, host: &str, port: u16) -> Result<()> {
             possible_peers.clear();
         }
 
-        // have a rest
-        sidevm::time::sleep(Duration::from_secs(5)).await; // hyper
+        sidevm::time::sleep(Duration::from_secs(5)).await;
     }
 
     Ok(())
@@ -300,10 +336,11 @@ async fn main() {
     sidevm::ocall::enable_ocall_trace(true).unwrap();
 
     // TODO
+    let worker_id: u16 = 5;
     let host = "127.0.0.1";
-    let port: u16 = 1999;
+    let port: u16 = 2000 + worker_id;
     let address = format!("{}:{}", host, port);
-    let test_public_key: &[u8] = &[0u8, 0u8, 0u8, 1u8];
+    let test_public_key: &[u8] = &[0u8, 0u8, 0u8, worker_id as u8];
     let app_state = Arc::new(Mutex::new(Some(Probe::new(test_public_key.to_vec()))));
 
     tokio::select! {

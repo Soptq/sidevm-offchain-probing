@@ -7,22 +7,7 @@ use scale::Encode;
 use serde::{Serialize, Deserialize};
 
 use crate::utils::{cache_get, http_get, euclidean_distance, gen_random_vec};
-
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
-pub struct ProbeParameters {
-    pub dim_size: u64,
-    pub sample_size: u64,
-    pub detection_size: u64,
-    pub batch_size: u64,
-    pub beta: f64,
-    pub lr: f64,
-    pub patience: u64,
-    pub factor: f64,
-    pub min_lr: f64,
-
-    pub eps: f64,
-}
-
+use crate::types::{ProbeParameters, ProbeStatus};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Peer {
@@ -99,6 +84,8 @@ pub struct Probe {
     pub telemetry: HashMap<String, f64>,
     pub resolved: HashMap<String, Vec<f64>>,
     pub peers: HashMap<String, Peer>,
+    // runtime status
+    pub status: ProbeStatus,
 }
 
 impl Probe {
@@ -126,6 +113,8 @@ impl Probe {
             .unwrap_or(1 * 1e5 as u64) as f64 / 1e6 as f64;
         let min_lr = cache_get::<u64>(b"sidevm_probing::param::min_lr")
             .unwrap_or(1 * 1e3 as u64) as f64 / 1e6 as f64;
+        let max_iters = cache_get::<u64>(b"sidevm_probing::param::max_iters")
+            .unwrap_or(10000 as u64);
 
         // initialize local database
         let mut telemetry = HashMap::new();
@@ -150,6 +139,7 @@ impl Probe {
         info!("\t patience: {:?}", patience);
         info!("\t factor: {:?}", factor);
         info!("\t min lr: {:?}", min_lr);
+        info!("\t max iters: {:?}", max_iters);
 
         Probe {
             encoded_public_key,
@@ -163,28 +153,24 @@ impl Probe {
                 patience,
                 factor,
                 min_lr,
+                max_iters,
                 eps: 1e-6 as f64,
             },
             telemetry,
             resolved,
             peers,
+            status: ProbeStatus {
+                precision_ms: 0.0,
+            }
         }
     }
 
     pub fn add_peer(&mut self, encoded_public_key: String, host: String, port: u16) -> Result<()> {
         let peer = Peer::new(encoded_public_key.clone(), host, port);
         // check if the peer is already in the list
-        if self.peers.contains_key(&encoded_public_key) {
-            info!("Peer {} is already in the peer list", &encoded_public_key);
-            return Ok(());
+        if !self.peers.contains_key(&encoded_public_key) {
+            self.peers.insert(peer.encoded_public_key.clone(), peer);
         }
-
-        // initialize peer position
-        if let None = self.resolved.get_mut(&peer.encoded_public_key) {
-            self.resolved.insert(peer.encoded_public_key.clone(), gen_random_vec::<f64>(self.parameters.dim_size as usize));
-        }
-
-        self.peers.insert(peer.encoded_public_key.clone(), peer);
 
         Ok(())
     }
