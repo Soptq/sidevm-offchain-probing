@@ -1,5 +1,5 @@
 use anyhow::{Result, anyhow};
-use log::{error, info};
+use log::info;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -168,22 +168,21 @@ impl Probe {
         }
     }
 
-    pub async fn add_peer(&mut self, peer: Peer) -> Result<()> {
+    pub async fn add_peer(&mut self, peer: Peer) -> Result<bool> {
         // check if the peer is already in the list
         if peer.encoded_public_key != self.encoded_public_key && !self.peers.contains_key(&peer.encoded_public_key) {
             self.peers.insert(peer.encoded_public_key.clone(), peer);
+            return Ok(true);
         }
 
-        Ok(())
+        Ok(false)
     }
 
-    pub async fn add_pending_peer(&mut self, encoded_public_key: String) -> Result<()> {
+    pub fn add_pending_peer(&mut self, encoded_public_key: String) {
         // check if the peer is already in the list
         if encoded_public_key != self.encoded_public_key && !self.peers.contains_key(&encoded_public_key) && !self.pending_peer_ids.contains(&encoded_public_key) {
             self.pending_peer_ids.push(encoded_public_key);
         }
-
-        Ok(())
     }
 
     pub fn estimate(&self, encoded_public_key_from: String, encoded_public_key_to: String) -> Result<f64> {

@@ -1,4 +1,4 @@
-use log::{error, info};
+use log::info;
 use std::convert::Infallible;
 
 use hyper::{Body, Request, Response};
@@ -12,16 +12,6 @@ async fn echo_handler(req: Request<Body>) -> Result<Response<Body>, Infallible> 
     info!("GET /echo/:msg");
     let msg = req.param("msg").unwrap();
     Ok(Response::new(Body::from(msg.clone())))
-}
-
-async fn telemetry_handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
-    info!("GET /telemetry");
-    let state = req.data::<AppState>().unwrap();
-    let lock = state.lock().await;
-    let probe = (*lock).as_ref().unwrap();
-
-    let telemetry = serde_json::to_string(&probe.telemetry).unwrap();
-    Ok(Response::new(Body::from(telemetry)))
 }
 
 async fn resolved_handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
@@ -44,7 +34,7 @@ async fn estimate_handler(req: Request<Body>) -> Result<Response<Body>, Infallib
     let estimation = probe.estimate(peer_id_from.clone(), peer_id_to.clone())
         .unwrap_or(-1.0 as f64);
 
-    Ok(Response::new(Body::from(format!("{}\n", estimation))))
+    Ok(Response::new(Body::from(format!("{}", estimation))))
 }
 
 async fn connected_handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
@@ -54,7 +44,7 @@ async fn connected_handler(req: Request<Body>) -> Result<Response<Body>, Infalli
     let mut lock = state.lock().await;
     let probe = (*lock).as_mut().unwrap();
 
-    probe.add_pending_peer(peer_id.clone()).await;
+    probe.add_pending_peer(peer_id.clone());
     Ok(Response::new(Body::from(peer_id.clone())))
 }
 
@@ -68,6 +58,26 @@ async fn status_handler(req: Request<Body>) -> Result<Response<Body>, Infallible
     Ok(Response::new(Body::from(status)))
 }
 
+async fn telemetry_handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+    info!("GET /debug/telemetry");
+    let state = req.data::<AppState>().unwrap();
+    let lock = state.lock().await;
+    let probe = (*lock).as_ref().unwrap();
+
+    let telemetry = serde_json::to_string(&probe.telemetry).unwrap();
+    Ok(Response::new(Body::from(telemetry)))
+}
+
+async fn peers_handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+    info!("GET /debug/peers");
+    let state = req.data::<AppState>().unwrap();
+    let lock = state.lock().await;
+    let probe = (*lock).as_ref().unwrap();
+
+    let peers = serde_json::to_string(&probe.peers).unwrap();
+    Ok(Response::new(Body::from(peers)))
+}
+
 pub fn router(app_state: AppState) -> Router<Body, Infallible> {
     Router::builder()
         .data(app_state)
@@ -77,6 +87,7 @@ pub fn router(app_state: AppState) -> Router<Body, Infallible> {
         .get("/connected/:from", connected_handler)
         .get("/status", status_handler)
         .get("/debug/telemetry", telemetry_handler)
+        .get("/debug/peers", peers_handler)
         .build()
         .unwrap()
 }

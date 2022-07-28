@@ -5,10 +5,10 @@ killall sidevm-host;
 killall screen;
 
 # initialize
-screen -S "sidevm-node-0" -d -m bash -c "ROCKET_PORT=8000 RUST_LOG='sidevm=info' WASMER_COMPILER=cranelift ./sidevm-host sideprog.wasm";
-screen -S "sidevm-node-1" -d -m bash -c "ROCKET_PORT=8001 RUST_LOG='sidevm=info' WASMER_COMPILER=cranelift ./sidevm-host sideprog.wasm";
-screen -S "sidevm-node-2" -d -m bash -c "ROCKET_PORT=8002 RUST_LOG='sidevm=info' WASMER_COMPILER=cranelift ./sidevm-host sideprog.wasm";
-screen -S "sidevm-node-3" -d -m bash -c "ROCKET_PORT=8003 RUST_LOG='sidevm=info' WASMER_COMPILER=cranelift ./sidevm-host sideprog.wasm";
+screen -S "sidevm-node-0" -d -m bash -c "ROCKET_PORT=8000 RUST_LOG='sidevm=info' ./sidevm-host sideprog.wasm";
+screen -S "sidevm-node-1" -d -m bash -c "ROCKET_PORT=8001 RUST_LOG='sidevm=info' ./sidevm-host sideprog.wasm";
+screen -S "sidevm-node-2" -d -m bash -c "ROCKET_PORT=8002 RUST_LOG='sidevm=info' ./sidevm-host sideprog.wasm";
+screen -S "sidevm-node-3" -d -m bash -c "ROCKET_PORT=8003 RUST_LOG='sidevm=info' ./sidevm-host sideprog.wasm";
 
 sleep 5;
 

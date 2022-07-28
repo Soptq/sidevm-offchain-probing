@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use log::{error, info};
 
-use probe::{Probe, Peer};
+use probe::Probe;
 use router::router;
 use service::RouterService;
 use optimize::optimize;
@@ -24,27 +24,26 @@ async fn init_pink_input(app_state: AppState) -> Result<()> {
     loop {
         if let Some(message) = sidevm::channel::input_messages().next().await {
             let message_str = String::from_utf8_lossy(&message);
-            info!("Received host message (RAW): {:?}", message_str);
             let msg: types::HostMessage = serde_json::from_str(&message_str)?;
             info!("Received host message: {:?}", msg);
             match msg.command.as_str() {
                 "add_peer" => {
                     let mut lock = app_state.lock().await;
-                    let mut probe = (*lock).as_mut().expect("should be able to get probe ref");
-                    probe.add_pending_peer(msg.data.clone()).await?;
+                    let probe = (*lock).as_mut().expect("should be able to get probe ref");
+                    probe.add_pending_peer(msg.data.clone());
                 }
                 "start_optimize" => {
                     let mut lock = app_state.lock().await;
-                    let mut probe = (*lock).as_mut().expect("should be able to get probe ref");
+                    let probe = (*lock).as_mut().expect("should be able to get probe ref");
                     probe.start_optimize();
                 }
                 "stop_optimize" => {
                     let mut lock = app_state.lock().await;
-                    let mut probe = (*lock).as_mut().expect("should be able to get probe ref");
+                    let probe = (*lock).as_mut().expect("should be able to get probe ref");
                     probe.stop_optimize();
                 }
                 "save_app" => {
-                    let mut lock = app_state.lock().await;
+                    let lock = app_state.lock().await;
                     let probe = (*lock).as_ref().expect("should be able to get probe ref");
                     let probe_state = serde_json::to_string(&probe)?;
                     sidevm::ocall::local_cache_set(b"sidevm_probing::probe_state", &probe_state.as_bytes())
@@ -66,7 +65,7 @@ async fn init_pink_input(app_state: AppState) -> Result<()> {
         }
     }
 
-    Ok(())
+    // Unreachable code
 }
 
 async fn init_server(address: &str, app_state: AppState) -> Result<()> {
@@ -89,15 +88,15 @@ async fn init_server(address: &str, app_state: AppState) -> Result<()> {
 
 #[sidevm::main]
 async fn main() {
-    sidevm::logger::Logger::with_max_level(log::Level::Trace).init();
+    sidevm::logger::Logger::with_max_level(log::LevelFilter::Trace).init();
     sidevm::ocall::enable_ocall_trace(true).unwrap();
 
     let mut worker_id: u16 = 0;
-    // if let Some(message) = sidevm::channel::input_messages().next().await {
-    //     let message_str = String::from_utf8_lossy(&message);
-    //     info!("Received host message: {:?}", message_str);
-    //     worker_id = message_str.parse::<u16>().unwrap();
-    // }
+    if let Some(message) = sidevm::channel::input_messages().next().await {
+        let message_str = String::from_utf8_lossy(&message);
+        info!("Received host message: {:?}", message_str);
+        worker_id = message_str.parse::<u16>().unwrap();
+    }
 
     // TODO
     let test_public_key: &[u8] = &[0u8, 0u8, 0u8, worker_id as u8];
@@ -106,8 +105,8 @@ async fn main() {
     let app_state = Arc::new(Mutex::new(Some(Probe::new(test_public_key.to_vec()))));
 
     tokio::select! {
-        // _ = init_pink_input(Arc::clone(&app_state)) => {},
+        _ = init_pink_input(Arc::clone(&app_state)) => {},
         _ = init_server(&address, Arc::clone(&app_state)) => {},
-        // _ = optimize(Arc::clone(&app_state)) => {},
+        _ = optimize(Arc::clone(&app_state)) => {},
     }
 }
