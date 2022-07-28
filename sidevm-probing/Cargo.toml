@@ -28,7 +28,5 @@ hex = { version = "0.4.3", default-features = false, features = ["alloc"] }
 anyhow = "1.0.58"
 rand = { version = "0.8.5" }
 
-auto-breath-macro = { path = "../auto-breath" }
-
 [patch.crates-io]
 routerify = { git = "https://github.com/kvinwang/routerify.git", branch = "opt-out-tcp" }

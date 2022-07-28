@@ -9,11 +9,13 @@ use routerify::Router;
 use crate::AppState;
 
 async fn echo_handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+    info!("GET /echo/:msg");
     let msg = req.param("msg").unwrap();
     Ok(Response::new(Body::from(msg.clone())))
 }
 
 async fn telemetry_handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+    info!("GET /telemetry");
     let state = req.data::<AppState>().unwrap();
     let lock = state.lock().await;
     let probe = (*lock).as_ref().unwrap();
@@ -23,6 +25,7 @@ async fn telemetry_handler(req: Request<Body>) -> Result<Response<Body>, Infalli
 }
 
 async fn resolved_handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+    info!("GET /resolved");
     let state = req.data::<AppState>().unwrap();
     let lock = state.lock().await;
     let probe = (*lock).as_ref().unwrap();
@@ -31,7 +34,32 @@ async fn resolved_handler(req: Request<Body>) -> Result<Response<Body>, Infallib
     Ok(Response::new(Body::from(resolved)))
 }
 
+async fn estimate_handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+    info!("GET /estimate/:from/:to");
+    let peer_id_from = req.param("from").unwrap();
+    let peer_id_to = req.param("to").unwrap();
+    let state = req.data::<AppState>().unwrap();
+    let lock = state.lock().await;
+    let probe = (*lock).as_ref().unwrap();
+    let estimation = probe.estimate(peer_id_from.clone(), peer_id_to.clone())
+        .unwrap_or(-1.0 as f64);
+
+    Ok(Response::new(Body::from(format!("{}\n", estimation))))
+}
+
+async fn connected_handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+    info!("GET /connected/:from");
+    let peer_id = req.param("from").unwrap();
+    let state = req.data::<AppState>().unwrap();
+    let mut lock = state.lock().await;
+    let probe = (*lock).as_mut().unwrap();
+
+    probe.add_pending_peer(peer_id.clone()).await;
+    Ok(Response::new(Body::from(peer_id.clone())))
+}
+
 async fn status_handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+    info!("GET /status");
     let state = req.data::<AppState>().unwrap();
     let lock = state.lock().await;
     let probe = (*lock).as_ref().unwrap();
@@ -40,26 +68,15 @@ async fn status_handler(req: Request<Body>) -> Result<Response<Body>, Infallible
     Ok(Response::new(Body::from(status)))
 }
 
-async fn estimate_handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
-    let peer_id_from = req.param("peer_id_from").unwrap();
-    let peer_id_to = req.param("peer_id_to").unwrap();
-    let state = req.data::<AppState>().unwrap();
-    let mut lock = state.lock().await;
-    let mut probe = (*lock).as_mut().unwrap();
-    let estimation = probe.estimate(peer_id_from.clone(), peer_id_to.clone())
-        .unwrap_or(-1.0 as f64);
-
-    Ok(Response::new(Body::from(format!("{}\n", estimation))))
-}
-
 pub fn router(app_state: AppState) -> Router<Body, Infallible> {
     Router::builder()
         .data(app_state)
         .get("/echo/:msg", echo_handler)
-        // .get("/telemetry", telemetry_handler)
         .get("/resolved", resolved_handler)
-        .get("/estimate/:peer_id_from/:peer_id_to", estimate_handler)
+        .get("/estimate/:from/:to", estimate_handler)
+        .get("/connected/:from", connected_handler)
         .get("/status", status_handler)
+        .get("/debug/telemetry", telemetry_handler)
         .build()
         .unwrap()
 }

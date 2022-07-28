@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use log::{error, info};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -12,8 +12,7 @@ use crate::AppState;
 
 const TIMEOUT_MAX_MILLIS: f64 = 1.0 * 60.0 * 1000.0; // 1 minute
 
-#[auto_breath_macro::auto_breath]
-pub async fn compute_loss(
+async fn compute_loss(
     encoded_public_key: &String,
     telemetry: &HashMap<String, f64>,
     resolved: &HashMap<String, Vec<f64>>,
@@ -35,12 +34,45 @@ pub async fn compute_loss(
         let test_prediction = euclidean_distance(&my_position, &test_peer_position);
         let test_error = (test_label - test_prediction).abs();
         test_total_loss += test_error / (telemetry.len() as f64 - 1.0 + eps);
+        sidevm::time::sleep(Duration::from_millis(0)).await;
     }
 
     Ok(test_total_loss)
 }
 
-#[auto_breath_macro::auto_breath]
+async fn collect_telemetry(
+    telemetry: &mut HashMap<String, f64>,
+    peers: &mut HashMap<String, Peer>,
+    batch_peers_id: &Vec<String>,
+    beta: f64,
+) -> Result<()> {
+    for peer_id in batch_peers_id {
+        let mut peer = peers.get_mut(peer_id)
+            .ok_or(anyhow!("{} should be in the peers data", peer_id))?;
+
+        // collect ttl
+        let ttl = match peer.echo().await {
+            Ok(ttl) => {
+                peer.online = true;
+                ttl
+            },
+            Err(_) => {
+                peer.online = false;
+                TIMEOUT_MAX_MILLIS
+            },
+        };
+
+        if let Some(value) = telemetry.get_mut(&peer.encoded_public_key) {
+            *value = *value * beta + ttl * (1.0 - beta);
+        } else {
+            telemetry.insert(peer.encoded_public_key.clone(), ttl);
+        }
+        sidevm::time::sleep(Duration::from_millis(0)).await;
+    }
+
+    Ok(())
+}
+
 pub async fn optimize(app_state: AppState) -> Result<()> {
     loop {
         let mut encoded_public_key: String = String::default();
@@ -50,7 +82,7 @@ pub async fn optimize(app_state: AppState) -> Result<()> {
         let mut status: ProbeStatus = ProbeStatus::default();
 
         let mut peers: HashMap<String, Peer> = HashMap::new();
-        let mut possible_peers_id: Vec<String> = Vec::new();
+        let mut pending_peer_ids: Vec<String> = Vec::new();
 
         // clone a copy of necessary data
         {
@@ -68,39 +100,33 @@ pub async fn optimize(app_state: AppState) -> Result<()> {
             sidevm::time::sleep(Duration::from_secs(10)).await;
             continue;
         }
+        sidevm::time::sleep(Duration::from_millis(0)).await;
 
         // collect telemetry
+        // here we will independently collect telemetry from 5 online peers and 5 offline peers
         {
+            let mut online_peers = peers.clone();
+            online_peers.retain(|_, peer| peer.online);
+            let mut offline_peers = peers.clone();
+            offline_peers.retain(|_, peer| !peer.online);
+
             let mut rng = thread_rng();
-            let batch_peers_id = peers
+            let online_batch_peers_id = online_peers
                 .keys()
                 .cloned()
                 .choose_multiple(&mut rng, parameters.detection_size as usize);
-            for peer_id in &batch_peers_id {
-                let mut peer = peers.get_mut(peer_id).expect("peer should be in the peers");
+            let offline_batch_peers_id = offline_peers
+                .keys()
+                .cloned()
+                .choose_multiple(&mut rng, parameters.detection_size as usize);
 
-                // collect ttl
-                let ttl = match peer.echo().await {
-                    Ok(ttl) => {
-                        peer.online = true;
-                        ttl
-                    },
-                    Err(_) => {
-                        peer.online = false;
-                        TIMEOUT_MAX_MILLIS
-                    },
-                };
-
-                if let Some(value) = telemetry.get_mut(&peer.encoded_public_key) {
-                    *value = *value * parameters.beta + ttl * (1.0 - parameters.beta);
-                } else {
-                    telemetry.insert(peer.encoded_public_key.clone(), ttl);
-                }
-            }
+            collect_telemetry(&mut telemetry, &mut peers, &online_batch_peers_id, parameters.beta).await?;
+            collect_telemetry(&mut telemetry, &mut peers, &offline_batch_peers_id, parameters.beta).await?;
         }
-
         let mut retained_peers = peers.clone();
         retained_peers.retain(|_, peer| peer.online);
+
+        sidevm::time::sleep(Duration::from_millis(0)).await;
 
         // start optimizing
         {
@@ -178,6 +204,7 @@ pub async fn optimize(app_state: AppState) -> Result<()> {
                         .zip(direction.iter())
                         .map(|(f, x)| f + (x / (norm.sqrt() + parameters.eps)) * error)
                         .collect::<Vec<f64>>();
+                    sidevm::time::sleep(Duration::from_millis(0)).await;
                 }
                 if peers_len == 0 {
                     break;
@@ -220,6 +247,8 @@ pub async fn optimize(app_state: AppState) -> Result<()> {
             resolved.insert(encoded_public_key.clone(), my_position);
         }
 
+        sidevm::time::sleep(Duration::from_millis(0)).await;
+
         // Aggregate from other peers' resolved.
         {
             let mut rng = thread_rng();
@@ -237,10 +266,9 @@ pub async fn optimize(app_state: AppState) -> Result<()> {
                 };
                 for (k, v) in peer_resolved {
                     // update peers
-                    if !possible_peers_id.contains(&k) {
-                        possible_peers_id.push(k.clone());
+                    if !pending_peer_ids.contains(&k) {
+                        pending_peer_ids.push(k.clone());
                     }
-                    info!("Peers discovery: {:?}", &possible_peers_id);
                     // update model
                     if let Some(value) = resolved.get_mut(&k) {
                         *value = (*value
@@ -258,7 +286,9 @@ pub async fn optimize(app_state: AppState) -> Result<()> {
                         resolved.insert(k.clone(), v);
                         aggregation_counter.insert(k.clone(), 1);
                     }
+                    sidevm::time::sleep(Duration::from_millis(0)).await;
                 }
+                info!("Peers discovery: {:?}", &pending_peer_ids);
             }
             for (k, v) in &aggregation_counter {
                 let value = resolved.get_mut(k).expect("should be in the resolved data");
@@ -267,6 +297,7 @@ pub async fn optimize(app_state: AppState) -> Result<()> {
                     .map(|i| i / v.clone() as f64)
                     .collect::<Vec<f64>>())
                     .to_vec();
+                sidevm::time::sleep(Duration::from_millis(0)).await;
             }
             // rebase resolved data so that the center of all positions is at the origin
             if aggregation_counter.len() > 0 {
@@ -297,20 +328,28 @@ pub async fn optimize(app_state: AppState) -> Result<()> {
         status.precision_ms = compute_loss(&encoded_public_key, &telemetry, &resolved, parameters.eps).await?;
         status.epoch = (status.epoch + 1) % u64::MAX;
 
+        sidevm::time::sleep(Duration::from_millis(0)).await;
+
         // update the app_state
+        let mut peers_to_notify = Vec::new();
         {
             let mut lock = app_state.lock().await;
             let mut probe = (*lock).as_mut().expect("should be able to get mut ref");
             probe.telemetry = telemetry;
             probe.resolved = resolved;
             probe.peers.extend(peers);
+            probe.pending_peer_ids.extend(pending_peer_ids);
             probe.status = status;
-            for possible_peer_id in &possible_peers_id {
-                probe.add_peer(
-                    possible_peer_id.clone()
-                ).await?;
+
+            for pending_peer_id in probe.pending_peer_ids.clone() {
+                let peer = Peer::new(pending_peer_id.clone()).await?;
+                probe.add_peer(peer.clone()).await?;
+                peers_to_notify.push(peer);
             }
-            possible_peers_id.clear();
+            probe.pending_peer_ids.clear();
+        }
+        for peer in peers_to_notify {
+            peer.notify_connected(encoded_public_key.clone());
         }
 
         sidevm::time::sleep(Duration::from_secs(5)).await;
