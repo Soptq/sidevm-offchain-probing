@@ -18,5 +18,13 @@ pub struct ProbeParameters {
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct ProbeStatus {
+    pub is_optimizing: bool,
     pub precision_ms: f64,
+    pub epoch: u64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct HostMessage {
+    pub command: String,
+    pub data: String,
 }

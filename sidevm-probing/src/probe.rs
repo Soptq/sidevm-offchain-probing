@@ -1,28 +1,36 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use log::{error, info};
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use scale::Encode;
 use serde::{Deserialize, Serialize};
 
 use crate::types::{ProbeParameters, ProbeStatus};
-use crate::utils::{cache_get, euclidean_distance, gen_random_vec, http_get};
+use crate::utils::{cache_get, euclidean_distance, gen_random_vec, get_address_by_id, http_get};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Peer {
     pub encoded_public_key: String,
     pub host: String,
     pub port: u16,
+    pub online: bool,
 }
 
 impl Peer {
-    pub fn new(encoded_public_key: String, host: String, port: u16) -> Self {
-        Peer {
+    pub async fn new(encoded_public_key: String) -> Result<Self> {
+        let (host, port) = get_address_by_id(&encoded_public_key).await?;
+        Ok(Peer {
             encoded_public_key,
             host,
             port,
-        }
+            online: true,
+        })
+    }
+
+    pub async fn retrieve_host_port(&mut self) {
+        let (host, port) = get_address_by_id(&self.encoded_public_key).await.unwrap();
+        self.host = host;
+        self.port = port;
     }
 
     pub async fn echo(&self) -> Result<f64> {
@@ -51,30 +59,6 @@ impl Peer {
         let resolved: HashMap<String, Vec<f64>> = serde_json::from_str(&text)?;
 
         Ok(resolved)
-    }
-
-    pub async fn peers(&self) -> Result<HashMap<String, Peer>> {
-        info!("Fetch peer data from peer {}", &self.encoded_public_key);
-        let url = format!("http://{}:{}/peers", &self.host, &self.port);
-        let response = http_get(&url).await?;
-        let text = String::from_utf8(response).expect("Peer data should be parseable");
-        let peers: HashMap<String, Peer> = serde_json::from_str(&text)?;
-
-        Ok(peers)
-    }
-
-    pub async fn add_peer(&self, encoded_public_key: &str, host: &str, port: u16) -> Result<()> {
-        info!(
-            "Add peer {}:{}[{}] to peer {}",
-            &host, &port, &encoded_public_key, &self.encoded_public_key
-        );
-        let url = format!(
-            "http://{}:{}/add_peer/{}/{}/{}",
-            &self.host, &self.port, &encoded_public_key, &host, &port
-        );
-        let response = http_get(&url).await?;
-
-        Ok(())
     }
 }
 
@@ -167,34 +151,51 @@ impl Probe {
             telemetry,
             resolved,
             peers,
-            status: ProbeStatus { precision_ms: 0.0 },
+            status: ProbeStatus {
+                is_optimizing: false,
+                precision_ms: 0.0,
+                epoch: 0,
+            },
         }
     }
 
-    pub fn add_peer(&mut self, encoded_public_key: String, host: String, port: u16) -> Result<()> {
-        let peer = Peer::new(encoded_public_key.clone(), host, port);
+    pub async fn add_peer(&mut self, encoded_public_key: String) -> Result<()> {
+        let peer = Peer::new(encoded_public_key.clone()).await?;
         // check if the peer is already in the list
-        if !self.peers.contains_key(&encoded_public_key) {
+        if encoded_public_key != self.encoded_public_key && !self.peers.contains_key(&encoded_public_key) {
             self.peers.insert(peer.encoded_public_key.clone(), peer);
         }
 
         Ok(())
     }
 
-    pub fn estimate(&self, encoded_public_key: String) -> Result<f64> {
-        let peer_position = match self.resolved.get(&encoded_public_key) {
-            Some(value) => value,
-            None => {
-                info!("Peer {} is not in the resolved list", encoded_public_key);
-                return Ok(0.0 as f64);
+    pub fn estimate(&self, encoded_public_key_from: String, encoded_public_key_to: String) -> Result<f64> {
+        // ensure both of them are online
+        if let Some(peer_from) = self.peers.get(&encoded_public_key_from) {
+            if !peer_from.online {
+                return Err(anyhow!("Peer {} is offline", &encoded_public_key_from));
             }
-        };
+        }
 
-        let my_position = self
-            .resolved
-            .get(&self.encoded_public_key)
-            .expect("My position should be found");
+        if let Some(peer_to) = self.peers.get(&encoded_public_key_to) {
+            if !peer_to.online {
+                return Err(anyhow!("Peer {} is offline", &encoded_public_key_to));
+            }
+        }
 
-        Ok(euclidean_distance(&my_position, &peer_position))
+        let resolved_peer_from = self.resolved.get(&encoded_public_key_from)
+            .ok_or(anyhow!("Peer {} is not resolved", &encoded_public_key_from))?;
+        let resolved_peer_to = self.resolved.get(&encoded_public_key_to)
+            .ok_or(anyhow!("Peer {} is not resolved", &encoded_public_key_to))?;
+
+        Ok(euclidean_distance(&resolved_peer_from, &resolved_peer_to))
+    }
+
+    pub fn start_optimize(&mut self) {
+        self.status.is_optimizing = true;
+    }
+
+    pub fn stop_optimize(&mut self) {
+        self.status.is_optimizing = false;
     }
 }
