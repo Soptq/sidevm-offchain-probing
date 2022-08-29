@@ -12,6 +12,7 @@ screen -S "sidevm-node-3" -d -m bash -c "ROCKET_PORT=8003 RUST_LOG='sidevm=info'
 
 sleep 5;
 
+# assign worker id
 curl -d "0" 127.0.0.1:8000/push/message
 curl -d "1" 127.0.0.1:8001/push/message
 curl -d "2" 127.0.0.1:8002/push/message
