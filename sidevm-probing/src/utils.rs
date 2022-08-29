@@ -1,6 +1,6 @@
 use anyhow::Result;
 use hyper::body::Buf;
-use log::{error, info};
+use log::info;
 use rand::distributions::Standard;
 use rand::prelude::Distribution;
 use scale::Decode;

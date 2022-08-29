@@ -1,5 +1,5 @@
 use anyhow::{Result, anyhow};
-use log::{error, info};
+use log::info;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -60,6 +60,14 @@ impl Peer {
 
         Ok(resolved)
     }
+
+    pub async fn notify_connected(&self, encoded_public_key: String) -> Result<()> {
+        info!("Notify connected to peer {} from {}", &self.encoded_public_key, &encoded_public_key);
+        let url = format!("http://{}:{}/connected/{}", &self.host, &self.port, &encoded_public_key);
+        http_get(&url).await?;
+
+        Ok(())
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -72,6 +80,7 @@ pub struct Probe {
     pub telemetry: HashMap<String, f64>,
     pub resolved: HashMap<String, Vec<f64>>,
     pub peers: HashMap<String, Peer>,
+    pub pending_peer_ids: Vec<String>,
     // runtime status
     pub status: ProbeStatus,
 }
@@ -108,7 +117,6 @@ impl Probe {
         // initialize local database
         let mut telemetry = HashMap::new();
         let mut resolved = HashMap::new();
-        let mut peers = HashMap::new();
 
         telemetry.insert(encoded_public_key.clone(), 0 as f64);
         resolved.insert(
@@ -150,7 +158,8 @@ impl Probe {
             },
             telemetry,
             resolved,
-            peers,
+            peers: HashMap::new(),
+            pending_peer_ids: Vec::new(),
             status: ProbeStatus {
                 is_optimizing: false,
                 precision_ms: 0.0,
@@ -159,14 +168,21 @@ impl Probe {
         }
     }
 
-    pub async fn add_peer(&mut self, encoded_public_key: String) -> Result<()> {
-        let peer = Peer::new(encoded_public_key.clone()).await?;
+    pub async fn add_peer(&mut self, peer: Peer) -> Result<bool> {
         // check if the peer is already in the list
-        if encoded_public_key != self.encoded_public_key && !self.peers.contains_key(&encoded_public_key) {
+        if peer.encoded_public_key != self.encoded_public_key && !self.peers.contains_key(&peer.encoded_public_key) {
             self.peers.insert(peer.encoded_public_key.clone(), peer);
+            return Ok(true);
         }
 
-        Ok(())
+        Ok(false)
+    }
+
+    pub fn add_pending_peer(&mut self, encoded_public_key: String) {
+        // check if the peer is already in the list
+        if encoded_public_key != self.encoded_public_key && !self.peers.contains_key(&encoded_public_key) && !self.pending_peer_ids.contains(&encoded_public_key) {
+            self.pending_peer_ids.push(encoded_public_key);
+        }
     }
 
     pub fn estimate(&self, encoded_public_key_from: String, encoded_public_key_to: String) -> Result<f64> {
