@@ -202,18 +202,34 @@ impl Probe {
         }
     }
 
+    pub fn get_best_endpoint_to(&self, encoded_public_key_to: String) -> Result<String> {
+        if let Some(peer_to) = self.peers.get(&encoded_public_key_to) {
+            if !peer_to.is_online() {
+                return Err(anyhow!("Peer {} is offline", &encoded_public_key_to));
+            }
+
+            Ok(peer_to.best_endpoint.clone())
+        } else {
+            return Err(anyhow!("Peer {} is not in the list", &encoded_public_key_to));
+        }
+    }
+
     pub fn estimate(&self, encoded_public_key_from: String, encoded_public_key_to: String) -> Result<f64> {
         // ensure both of them are online
         if let Some(peer_from) = self.peers.get(&encoded_public_key_from) {
             if !peer_from.is_online() {
                 return Err(anyhow!("Peer {} is offline", &encoded_public_key_from));
             }
+        } else {
+            return Err(anyhow!("Peer {} is not in the list", &encoded_public_key_from));
         }
 
         if let Some(peer_to) = self.peers.get(&encoded_public_key_to) {
             if !peer_to.is_online() {
                 return Err(anyhow!("Peer {} is offline", &encoded_public_key_to));
             }
+        } else {
+            return Err(anyhow!("Peer {} is not in the list", &encoded_public_key_to));
         }
 
         let resolved_peer_from = self.resolved.get(&encoded_public_key_from)

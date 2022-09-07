@@ -46,3 +46,8 @@ pub struct QueryEstimateRequest {
 pub struct QueryConnectedRequest {
     pub from: String,
 }
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct QueryBestEndpointRequest {
+    pub to: String,
+}

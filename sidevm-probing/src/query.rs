@@ -44,6 +44,16 @@ pub async fn init_pink_query(app_state: AppState) -> Result<()> {
 
                     let _ = query.reply_tx.send(peer_id.clone().as_bytes());
                 }
+                "best_endpoint" => {
+                    let best_endpoint_request: types::QueryBestEndpointRequest = serde_json::from_str(&msg.data)?;
+                    let peer_id = best_endpoint_request.to;
+
+                    let lock = app_state.lock().await;
+                    let probe = (*lock).as_ref().unwrap();
+                    let best_endpoint = probe.get_best_endpoint_to(peer_id.clone()).unwrap();
+
+                    let _ = query.reply_tx.send(best_endpoint.as_bytes());
+                }
                 "status" => {
                     let lock = app_state.lock().await;
                     let probe = (*lock).as_ref().unwrap();
