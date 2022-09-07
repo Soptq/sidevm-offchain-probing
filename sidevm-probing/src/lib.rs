@@ -5,6 +5,7 @@ use probe::Probe;
 use router::router;
 use service::RouterService;
 use optimize::optimize;
+use query::init_pink_query;
 use utils::get_address_by_id;
 
 use std::sync::Arc;
@@ -12,6 +13,7 @@ use tokio::sync::Mutex;
 
 mod probe;
 mod router;
+mod query;
 mod service;
 mod optimize;
 mod types;
@@ -88,7 +90,7 @@ async fn init_server(address: &str, app_state: AppState) -> Result<()> {
 
 #[sidevm::main]
 async fn main() {
-    sidevm::logger::Logger::with_max_level(log::LevelFilter::Trace).init();
+    sidevm::logger::Logger::with_max_level(log::Level::Trace).init();
     sidevm::ocall::enable_ocall_trace(true).unwrap();
 
     let mut worker_id: u16 = 0;
@@ -106,6 +108,7 @@ async fn main() {
 
     tokio::select! {
         _ = init_pink_input(Arc::clone(&app_state)) => {},
+        _ = init_pink_query(Arc::clone(&app_state)) => {},
         _ = init_server(&address, Arc::clone(&app_state)) => {},
         _ = optimize(Arc::clone(&app_state)) => {},
     }

@@ -28,3 +28,20 @@ pub struct HostMessage {
     pub command: String,
     pub data: String,
 }
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct QueryMessage {
+    pub command: String,
+    pub data: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct QueryEstimateRequest {
+    pub from: String,
+    pub to: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct QueryConnectedRequest {
+    pub from: String,
+}

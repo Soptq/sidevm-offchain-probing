@@ -37,6 +37,7 @@ pub fn euclidean_distance(a: &[f64], b: &[f64]) -> f64 {
     sum.sqrt()
 }
 
+// TODO: replace
 pub async fn get_address_by_id(peer_id: &str) -> Result<(String, u16)> {
     let (host, port) = match peer_id {
         "00000000" => ("127.0.0.1".to_string(), 2000),

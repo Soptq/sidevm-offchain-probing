@@ -79,7 +79,7 @@ pub struct Probe {
     // storages
     pub telemetry: HashMap<String, f64>,
     pub resolved: HashMap<String, Vec<f64>>,
-    pub peers: HashMap<String, Peer>,
+    pub peers: HashMap<String, Peer>, // TODO: timeout
     pub pending_peer_ids: Vec<String>,
     // runtime status
     pub status: ProbeStatus,
