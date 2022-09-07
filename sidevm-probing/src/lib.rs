@@ -102,8 +102,8 @@ async fn main() {
 
     // TODO
     let test_public_key: &[u8] = &[0u8, 0u8, 0u8, worker_id as u8];
-    let (host, port) = get_address_by_id(&hex::encode(test_public_key.clone())).await.unwrap();
-    let address = format!("{}:{}", host, port);
+    let endpoints = get_address_by_id(&hex::encode(test_public_key.clone())).await.unwrap();
+    let address = endpoints[0].clone();
     let app_state = Arc::new(Mutex::new(Some(Probe::new(test_public_key.to_vec()))));
 
     tokio::select! {

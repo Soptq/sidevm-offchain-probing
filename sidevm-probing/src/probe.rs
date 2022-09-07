@@ -11,49 +11,58 @@ use crate::utils::{cache_get, euclidean_distance, gen_random_vec, get_address_by
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Peer {
     pub encoded_public_key: String,
-    pub host: String,
-    pub port: u16,
+    pub best_endpoint: String,
+    pub endpoints: Vec<String>,
     pub offline_cnt: u8,
 }
 
 impl Peer {
     pub async fn new(encoded_public_key: String) -> Result<Self> {
-        let (host, port) = get_address_by_id(&encoded_public_key).await?;
+        let endpoints = get_address_by_id(&encoded_public_key).await?;
         Ok(Peer {
             encoded_public_key,
-            host,
-            port,
+            best_endpoint: endpoints[0].clone(),
+            endpoints,
             offline_cnt: 0,
         })
     }
 
-    pub async fn retrieve_host_port(&mut self) {
-        let (host, port) = get_address_by_id(&self.encoded_public_key).await.unwrap();
-        self.host = host;
-        self.port = port;
+    pub async fn update_endpoints(&mut self) {
+        let endpoints = get_address_by_id(&self.encoded_public_key).await.unwrap();
+        self.endpoints = endpoints;
     }
 
-    pub async fn echo(&self) -> Result<f64> {
+    pub async fn echo(&mut self) -> Result<f64> {
         info!("Echo to peer {}", &self.encoded_public_key);
         let start = SystemTime::now();
         let start_since_the_epoch = start
             .duration_since(UNIX_EPOCH)
             .expect("Time went backwards");
-        let start_ms = start_since_the_epoch.as_millis();
-        let url = format!("http://{}:{}/echo/{}", self.host, self.port, &start_ms);
-        http_get(&url).await?;
 
-        let end = SystemTime::now();
-        let end_since_the_epoch = end.duration_since(UNIX_EPOCH).expect("Time went backwards");
-        let end_ms = end_since_the_epoch.as_millis();
+        let mut best_latency = u128::MAX;
+        for endpoint in &self.endpoints {
+            let start_ms = start_since_the_epoch.as_millis();
+
+            let url = format!("http://{}/echo/{}", endpoint, &start_ms);
+            http_get(&url).await?;
+
+            let end = SystemTime::now();
+            let end_since_the_epoch = end.duration_since(UNIX_EPOCH).expect("Time went backwards");
+            let end_ms = end_since_the_epoch.as_millis();
+
+            if end_ms - start_ms < best_latency {
+                self.best_endpoint = endpoint.clone();
+                best_latency = end_ms - start_ms;
+            }
+        }
 
         // TODO: remove delay
-        Ok((end_ms - start_ms + 100) as f64)
+        Ok((best_latency + 100) as f64)
     }
 
     pub async fn resolved(&self) -> Result<HashMap<String, Vec<f64>>> {
         info!("Fetch resolved data from peer {}", &self.encoded_public_key);
-        let url = format!("http://{}:{}/resolved", &self.host, &self.port);
+        let url = format!("http://{}/resolved", &self.best_endpoint);
         let response = http_get(&url).await?;
         let text = String::from_utf8(response).expect("Resolved data should be parseable");
         let resolved: HashMap<String, Vec<f64>> = serde_json::from_str(&text)?;
@@ -63,7 +72,7 @@ impl Peer {
 
     pub async fn notify_connected(&self, encoded_public_key: String) -> Result<()> {
         info!("Notify connected to peer {} from {}", &self.encoded_public_key, &encoded_public_key);
-        let url = format!("http://{}:{}/connected/{}", &self.host, &self.port, &encoded_public_key);
+        let url = format!("http://{}/connected/{}", &self.best_endpoint, &encoded_public_key);
         http_get(&url).await?;
 
         Ok(())
@@ -83,7 +92,7 @@ pub struct Probe {
     // storages
     pub telemetry: HashMap<String, f64>,
     pub resolved: HashMap<String, Vec<f64>>,
-    pub peers: HashMap<String, Peer>, // TODO: timeout
+    pub peers: HashMap<String, Peer>,
     pub pending_peer_ids: Vec<String>,
     // runtime status
     pub status: ProbeStatus,

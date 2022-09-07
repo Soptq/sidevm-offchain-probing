@@ -54,6 +54,7 @@ async fn collect_telemetry(
         let mut peer = peers.get_mut(peer_id)
             .ok_or(anyhow!("{} should be in the peers data", peer_id))?;
 
+        peer.update_endpoints().await;
         // collect ttl
         match peer.echo().await {
             Ok(ttl) => {

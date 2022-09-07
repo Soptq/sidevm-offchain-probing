@@ -1,6 +1,5 @@
 use anyhow::{Result};
 use log::{info};
-use serde::{Deserialize, Serialize};
 
 use crate::AppState;
 use crate::types;

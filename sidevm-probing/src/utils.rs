@@ -38,20 +38,20 @@ pub fn euclidean_distance(a: &[f64], b: &[f64]) -> f64 {
 }
 
 // TODO: replace
-pub async fn get_address_by_id(peer_id: &str) -> Result<(String, u16)> {
-    let (host, port) = match peer_id {
-        "00000000" => ("127.0.0.1".to_string(), 2000),
-        "00000001" => ("127.0.0.1".to_string(), 2001),
-        "00000002" => ("127.0.0.1".to_string(), 2002),
-        "00000003" => ("127.0.0.1".to_string(), 2003),
-        "00000004" => ("127.0.0.1".to_string(), 2004),
-        "00000005" => ("127.0.0.1".to_string(), 2005),
-        "00000006" => ("127.0.0.1".to_string(), 2006),
-        "00000007" => ("127.0.0.1".to_string(), 2007),
+pub async fn get_address_by_id(peer_id: &str) -> Result<Vec<String>> {
+    let endpoints = match peer_id {
+        "00000000" => vec!("127.0.0.1:2000".to_string()),
+        "00000001" => vec!("127.0.0.1:2001".to_string()),
+        "00000002" => vec!("127.0.0.1:2002".to_string()),
+        "00000003" => vec!("127.0.0.1:2003".to_string()),
+        "00000004" => vec!("127.0.0.1:2004".to_string()),
+        "00000005" => vec!("127.0.0.1:2005".to_string()),
+        "00000006" => vec!("127.0.0.1:2006".to_string()),
+        "00000007" => vec!("127.0.0.1:2007".to_string()),
         _ => panic!("Unknown peer id"),
     };
 
-    Ok((host, port as u16))
+    Ok(endpoints)
 }
 
 pub async fn http_get(url: &str) -> Result<Vec<u8>> {
