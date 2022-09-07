@@ -13,7 +13,7 @@ pub struct Peer {
     pub encoded_public_key: String,
     pub host: String,
     pub port: u16,
-    pub online: bool,
+    pub offline_cnt: u8,
 }
 
 impl Peer {
@@ -23,7 +23,7 @@ impl Peer {
             encoded_public_key,
             host,
             port,
-            online: true,
+            offline_cnt: 0,
         })
     }
 
@@ -67,6 +67,10 @@ impl Peer {
         http_get(&url).await?;
 
         Ok(())
+    }
+
+    pub fn is_online(&self) -> bool {
+        self.offline_cnt == 0
     }
 }
 
@@ -113,6 +117,8 @@ impl Probe {
             / 1e6 as f64;
         let max_iters =
             cache_get::<u64>(b"sidevm_probing::param::max_iters").unwrap_or(10000 as u64);
+        let max_offline_cnt =
+            cache_get::<u8>(b"sidevm_probing::param::max_offline_cnt").unwrap_or(16 as u8);
 
         // initialize local database
         let mut telemetry = HashMap::new();
@@ -140,6 +146,7 @@ impl Probe {
         info!("\t factor: {:?}", factor);
         info!("\t min lr: {:?}", min_lr);
         info!("\t max iters: {:?}", max_iters);
+        info!("\t max offline cnt: {:?}", max_offline_cnt);
 
         Probe {
             encoded_public_key,
@@ -154,6 +161,7 @@ impl Probe {
                 factor,
                 min_lr,
                 max_iters,
+                max_offline_cnt,
                 eps: 1e-6 as f64,
             },
             telemetry,
@@ -188,13 +196,13 @@ impl Probe {
     pub fn estimate(&self, encoded_public_key_from: String, encoded_public_key_to: String) -> Result<f64> {
         // ensure both of them are online
         if let Some(peer_from) = self.peers.get(&encoded_public_key_from) {
-            if !peer_from.online {
+            if !peer_from.is_online() {
                 return Err(anyhow!("Peer {} is offline", &encoded_public_key_from));
             }
         }
 
         if let Some(peer_to) = self.peers.get(&encoded_public_key_to) {
-            if !peer_to.online {
+            if !peer_to.is_online() {
                 return Err(anyhow!("Peer {} is offline", &encoded_public_key_to));
             }
         }

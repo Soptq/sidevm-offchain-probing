@@ -12,6 +12,7 @@ pub struct ProbeParameters {
     pub factor: f64,
     pub min_lr: f64,
     pub max_iters: u64,
+    pub max_offline_cnt: u8,
 
     pub eps: f64,
 }

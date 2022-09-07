@@ -28,7 +28,7 @@ async fn compute_loss(
             continue;
         }
         if let Some(peer) = peers.get(test_entry) {
-            if !peer.online {
+            if !peer.is_online() {
                 continue;
             }
         }
@@ -57,7 +57,7 @@ async fn collect_telemetry(
         // collect ttl
         match peer.echo().await {
             Ok(ttl) => {
-                peer.online = true;
+                peer.offline_cnt = 0;
                 if let Some(value) = telemetry.get_mut(&peer.encoded_public_key) {
                     *value = *value * beta + ttl * (1.0 - beta);
                 } else {
@@ -65,7 +65,7 @@ async fn collect_telemetry(
                 }
             },
             Err(_) => {
-                peer.online = false;
+                peer.offline_cnt += 1;
             },
         };
         sidevm::time::maybe_rest().await;
@@ -107,9 +107,9 @@ pub async fn optimize(app_state: AppState) -> Result<()> {
         // here we will independently collect telemetry from 5 online peers and 5 offline peers
         {
             let mut online_peers = peers.clone();
-            online_peers.retain(|_, peer| peer.online);
+            online_peers.retain(|_, peer| peer.is_online());
             let mut offline_peers = peers.clone();
-            offline_peers.retain(|_, peer| !peer.online);
+            offline_peers.retain(|_, peer| !peer.is_online());
 
             let mut rng = thread_rng();
             let online_batch_peers_id = online_peers
@@ -125,7 +125,7 @@ pub async fn optimize(app_state: AppState) -> Result<()> {
             collect_telemetry(&mut telemetry, &mut peers, &offline_batch_peers_id, parameters.beta).await?;
         }
         let mut retained_peers = peers.clone();
-        retained_peers.retain(|_, peer| peer.online);
+        retained_peers.retain(|_, peer| peer.is_online());
 
         sidevm::time::maybe_rest().await;
 
@@ -338,10 +338,11 @@ pub async fn optimize(app_state: AppState) -> Result<()> {
             let mut probe = (*lock).as_mut().expect("should be able to get mut ref");
             probe.telemetry = telemetry;
             probe.resolved = resolved;
-            probe.peers.extend(peers);
+            probe.peers = peers;
             probe.pending_peer_ids.extend(pending_peer_ids);
             probe.status = status;
 
+            // add pending peers
             for pending_peer_id in probe.pending_peer_ids.clone() {
                 let peer = Peer::new(pending_peer_id.clone()).await?;
                 let added = probe.add_peer(peer.clone()).await?;
@@ -350,7 +351,10 @@ pub async fn optimize(app_state: AppState) -> Result<()> {
                 }
             }
             probe.pending_peer_ids.clear();
+            // remove offline peers where its `offline_cnt` reaches threshold.
+            probe.peers.retain(|_, peer| peer.offline_cnt < parameters.max_offline_cnt);
         }
+
         for peer in peers_to_notify {
             peer.notify_connected(encoded_public_key.clone())
                 .await
