@@ -40,11 +40,20 @@ impl Peer {
             .expect("Time went backwards");
 
         let mut best_latency = u128::MAX;
+        let mut all_endpoints_failed = true;
+
         for endpoint in &self.endpoints {
             let start_ms = start_since_the_epoch.as_millis();
 
             let url = format!("http://{}/echo/{}", endpoint, &start_ms);
-            http_get(&url).await?;
+            match http_get(&url).await {
+                Ok(_) => {
+                    all_endpoints_failed = false;
+                }
+                Err(_) => {
+                    continue;
+                }
+            }
 
             let end = SystemTime::now();
             let end_since_the_epoch = end.duration_since(UNIX_EPOCH).expect("Time went backwards");
@@ -54,6 +63,10 @@ impl Peer {
                 self.best_endpoint = endpoint.clone();
                 best_latency = end_ms - start_ms;
             }
+        }
+
+        if all_endpoints_failed {
+            return Err(anyhow!("All endpoints failed"));
         }
 
         // TODO: remove delay
